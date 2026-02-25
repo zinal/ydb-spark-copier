@@ -27,6 +27,7 @@ public class Copier {
 
     private static final String DEFAULT_CONFIG_PATH = "spark-config.xml";
     private static final String CATALOG_NAME = "src";
+    private static final String CATALOG_PROPERTY = "spark.sql.catalog.src";
 
     private final Properties sparkConfig;
     private final Config config;
@@ -43,10 +44,15 @@ public class Copier {
     }
 
     public void run() throws Exception {
+        String url = sparkConfig.getProperty(CATALOG_PROPERTY);
+        if (url == null) {
+            throw new IllegalArgumentException("Missing configuration: " + CATALOG_PROPERTY);
+        }
+        log.info("YDB connection URL: {}", url);
+
         SparkSession.Builder builder = SparkSession.builder()
                 .appName("YDB Table Copier")
                 .master("local[*]");
-
         sparkConfig.forEach((k, v) -> builder.config(k.toString(), v.toString()));
 
         try (SparkSession spark = builder.getOrCreate()) {

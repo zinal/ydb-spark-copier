@@ -1,12 +1,20 @@
-# YDB Spark Sample
+# YDB Copy Table Sample
 
-Sample Java application using Apache Spark 3.5 with YDB Spark Connector. Connects to YDB via the Catalog API.
+Sample Java application to export and import YDB tables using Apache Spark with the YDB Spark Connector. Connects to YDB via the Catalog API and uses Parquet as the intermediate storage format.
 
-## Modes
+## Principles of Operation
 
-1. **Default** (no mode): `SHOW TABLES FROM src`
-2. **export**: Read from YDB table via Spark SQL (optional filter), write to Parquet directory
-3. **import**: Read from Parquet directory, apply optional filter, ingest into YDB table
+The application runs in two modes:
+
+1. **Export** – Reads data from a YDB table via Spark SQL, optionally applying a `WHERE` filter, and writes the result to a Parquet directory on the local filesystem.
+2. **Import** – Reads data from a Parquet directory, optionally applies a `WHERE` filter, and inserts the result into a YDB table.
+
+### How It Works
+
+- **Catalog integration**: YDB is exposed as a Spark SQL catalog named `src`. The catalog configuration (connection URL, auth, etc.) is loaded from an XML properties file.
+- **Export flow**: `SELECT * FROM src.<table> [WHERE ...]` → Spark DataFrame → Parquet files (overwrite mode).
+- **Import flow**: Parquet directory → Spark DataFrame → temp view → `INSERT INTO src.<table> SELECT * FROM parquet_src [WHERE ...]`.
+- **Table naming**: YDB table paths use dots (e.g. `database.schema.table`). Slashes in the table name are converted to dots automatically.
 
 ## Requirements
 
@@ -16,11 +24,12 @@ Sample Java application using Apache Spark 3.5 with YDB Spark Connector. Connect
 
 ## Configuration
 
-Edit `src/main/resources/spark-config.xml` to set your YDB connection parameters:
+Edit `scripts/spark-config.xml` (or your custom config file) to set YDB connection parameters:
 
-- **url** – YDB connection string (e.g. `grpc://localhost:2136/local` for local Docker)
-- **auth.token.file** – Path to token file for cloud/remote YDB (uncomment if needed)
-- **auth.ca.file** – Path to TLS certificate for secure connections (uncomment if needed)
+- **spark.sql.catalog.src** – YDB catalog implementation class
+- **spark.sql.catalog.src.url** – YDB connection string (e.g. `grpc://localhost:2136/local` for local Docker)
+- **spark.sql.catalog.src.auth.token.file** – Path to token file for cloud/remote YDB (uncomment if needed)
+- **spark.sql.catalog.src.auth.ca.file** – Path to TLS certificate for secure connections (uncomment if needed)
 
 See [YDB Spark documentation](https://ydb.tech/docs/en/integrations/ingestion/spark) for all options.
 
@@ -30,43 +39,40 @@ See [YDB Spark documentation](https://ydb.tech/docs/en/integrations/ingestion/sp
 mvn clean package
 ```
 
-## Run
+Produces `target/ydb-copier-1.0-SNAPSHOT.jar` and, with the release profile, `target/ydb-copier-1.0-SNAPSHOT-bin.zip` containing the JAR, dependencies, and scripts.
 
-### Command line options
+## Usage
+
+### Command Line Options
 
 | Option | Description |
 |--------|-------------|
-| `--config <path>` | Spark config XML (default: spark-config.xml) |
-| `--mode export\|import` | Execution mode |
-| `--input <path>` | Input: table (e.g. src.myschema.mytable) for export, directory for import |
-| `--output <path>` | Output: directory for export, table for import |
-| `--filter <sql>` | Optional WHERE clause (e.g. "a=1 AND b=2") |
+| `--config <path>` | Path to Spark config XML (default: `spark-config.xml` in current directory) |
+| `--mode export\|import` | Execution mode (required) |
+| `--table <name>` | YDB table path (e.g. `mydb.myschema.mytable`) |
+| `--directory <path>` | Local directory: output for export, input for import |
+| `--filter <sql>` | Optional WHERE clause (e.g. `id>100 AND status='active'`) |
 
 ### Examples
 
-**Show tables (default):**
-```bash
-mvn exec:java
-```
-
 **Export YDB table to Parquet:**
 ```bash
-mvn exec:java -Dexec.args="--mode export --input src.myschema.mytable --output /tmp/parquet-out"
+mvn exec:java -Dexec.args="--config spark-config.xml --mode export --table mydb.myschema.mytable --directory /tmp/parquet-out"
 ```
 
 **Export with filter:**
 ```bash
-mvn exec:java -Dexec.args="--mode export --input src.myschema.mytable --output /tmp/parquet-out --filter 'id>100 AND status=\"active\"'"
+mvn exec:java -Dexec.args="--config spark-config.xml --mode export --table mydb.myschema.mytable --directory /tmp/parquet-out --filter 'id>100 AND status=\"active\"'"
 ```
 
 **Import Parquet to YDB:**
 ```bash
-mvn exec:java -Dexec.args="--mode import --input /tmp/parquet-in --output src.myschema.mytable"
+mvn exec:java -Dexec.args="--config spark-config.xml --mode import --table mydb.myschema.mytable --directory /tmp/parquet-in"
 ```
 
 **Import with filter:**
 ```bash
-mvn exec:java -Dexec.args="--mode import --input /tmp/parquet-in --output src.myschema.mytable --filter 'year=2024'"
+mvn exec:java -Dexec.args="--config spark-config.xml --mode import --table mydb.myschema.mytable --directory /tmp/parquet-in --filter 'year=2024'"
 ```
 
 ### spark-submit
@@ -76,7 +82,9 @@ spark-submit \
   --master "local[*]" \
   --packages tech.ydb.spark:ydb-spark-connector-shaded:2.1.0 \
   --conf spark.executor.memory=4g \
-  --class tech.ydb.samples.spark.Main \
-  target/ydb-spark-sample-1.0-SNAPSHOT.jar \
-  --config spark-config.xml --mode export --input src.mytable --output /tmp/out
+  --class copytab.Copier \
+  target/ydb-copier-1.0-SNAPSHOT.jar \
+  --config spark-config.xml --mode export --table mydb.mytable --directory /tmp/out
 ```
+
+When using the assembled zip, run from the extracted directory so that `spark-config.xml` and scripts are available. The main JAR is in the `lib` folder.
