@@ -1,4 +1,4 @@
-package tech.ydb.samples.spark;
+package copytab;
 
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
@@ -8,7 +8,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Properties;
 
@@ -17,22 +16,28 @@ import java.util.Properties;
  * <p>
  * Modes:
  * <ul>
- *   <li>Default (no mode): SHOW TABLES FROM src</li>
- *   <li>export: Read from YDB table, write to Parquet directory</li>
- *   <li>import: Read from Parquet directory, write to YDB table</li>
+ * <li>Default (no mode): SHOW TABLES FROM src</li>
+ * <li>export: Read from YDB table, write to Parquet directory</li>
+ * <li>import: Read from Parquet directory, write to YDB table</li>
  * </ul>
  */
-public class Main {
+public class Copier {
 
-    private static final Logger log = LoggerFactory.getLogger(Main.class);
+    private static final Logger log = LoggerFactory.getLogger(Copier.class);
 
     private static final String DEFAULT_CONFIG_PATH = "spark-config.xml";
     private static final String CATALOG_NAME = "src";
 
     private final Properties sparkConfig;
-    private final Args args;
+    private final Config args;
 
-    public Main(Properties sparkConfig, Args args) {
+    /**
+     * Construct the copier instance.
+     *
+     * @param sparkConfig Set of Spark properties
+     * @param args Execution settings
+     */
+    public Copier(Properties sparkConfig, Config args) {
         this.sparkConfig = sparkConfig;
         this.args = args;
     }
@@ -45,9 +50,7 @@ public class Main {
         sparkConfig.forEach((k, v) -> builder.config(k.toString(), v.toString()));
 
         try (SparkSession spark = builder.getOrCreate()) {
-            if (args.mode == null) {
-                runShowTables(spark);
-            } else if ("export".equals(args.mode)) {
+            if ("export".equals(args.mode)) {
                 runExport(spark, args.input, args.output, args.filter);
             } else if ("import".equals(args.mode)) {
                 runImport(spark, args.input, args.output, args.filter);
@@ -59,23 +62,14 @@ public class Main {
 
     public static void main(String[] args) {
         try {
-            Args parsed = parseArgs(args);
+            Config parsed = parseArgs(args);
             Properties sparkConfig = loadPropertiesFromXml(parsed.configPath);
-            Main main = new Main(sparkConfig, parsed);
+            Copier main = new Copier(sparkConfig, parsed);
             main.run();
-        } catch(Exception ex) {
+        } catch (Exception ex) {
             log.error("FATAL", ex);
             System.exit(1);
         }
-    }
-
-    private void runShowTables(SparkSession spark) {
-        log.info("Spark session created. Running: SHOW TABLES FROM {}", CATALOG_NAME);
-        log.info("---");
-        Dataset<Row> tables = spark.sql("SHOW TABLES FROM " + CATALOG_NAME);
-        tables.show(Integer.MAX_VALUE, false);
-        log.info("---");
-        log.info("Done.");
     }
 
     private void runExport(SparkSession spark, String table, String outputDir, String filter) {
@@ -114,26 +108,36 @@ public class Main {
         return props;
     }
 
-    private static Args parseArgs(String[] args) {
-        Args result = new Args();
+    private static Config parseArgs(String[] args) {
+        Config result = new Config();
         result.configPath = DEFAULT_CONFIG_PATH;
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
                 case "--config" -> {
-                    if (i + 1 < args.length) result.configPath = args[++i];
+                    if (i + 1 < args.length) {
+                        result.configPath = args[++i];
+                    }
                 }
                 case "--mode" -> {
-                    if (i + 1 < args.length) result.mode = args[++i];
+                    if (i + 1 < args.length) {
+                        result.mode = args[++i];
+                    }
                 }
                 case "--input" -> {
-                    if (i + 1 < args.length) result.input = args[++i];
+                    if (i + 1 < args.length) {
+                        result.input = args[++i];
+                    }
                 }
                 case "--output" -> {
-                    if (i + 1 < args.length) result.output = args[++i];
+                    if (i + 1 < args.length) {
+                        result.output = args[++i];
+                    }
                 }
                 case "--filter" -> {
-                    if (i + 1 < args.length) result.filter = args[++i];
+                    if (i + 1 < args.length) {
+                        result.filter = args[++i];
+                    }
                 }
                 default -> {
                     if (i == 0 && !args[i].startsWith("--")) {
@@ -144,14 +148,19 @@ public class Main {
         }
 
         if (result.mode != null) {
-            if (result.input == null) throw new IllegalArgumentException("--input is required for mode=" + result.mode);
-            if (result.output == null) throw new IllegalArgumentException("--output is required for mode=" + result.mode);
+            if (result.input == null) {
+                throw new IllegalArgumentException("--input is required for mode=" + result.mode);
+            }
+            if (result.output == null) {
+                throw new IllegalArgumentException("--output is required for mode=" + result.mode);
+            }
         }
 
         return result;
     }
 
-    private static class Args {
+    public static class Config {
+
         String configPath;
         String mode;
         String input;

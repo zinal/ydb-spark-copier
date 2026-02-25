@@ -4,5 +4,6 @@ target/
 *.war
 .idea/
 .vscode/
+nb-configuration.xml
 *.iml
 .DS_Store
