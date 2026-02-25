@@ -29,17 +29,17 @@ public class Copier {
     private static final String CATALOG_NAME = "src";
 
     private final Properties sparkConfig;
-    private final Config args;
+    private final Config config;
 
     /**
      * Construct the copier instance.
      *
      * @param sparkConfig Set of Spark properties
-     * @param args Execution settings
+     * @param config Execution settings
      */
-    public Copier(Properties sparkConfig, Config args) {
+    public Copier(Properties sparkConfig, Config config) {
         this.sparkConfig = sparkConfig;
-        this.args = args;
+        this.config = config;
     }
 
     public void run() throws Exception {
@@ -50,19 +50,30 @@ public class Copier {
         sparkConfig.forEach((k, v) -> builder.config(k.toString(), v.toString()));
 
         try (SparkSession spark = builder.getOrCreate()) {
-            if ("export".equals(args.mode)) {
-                runExport(spark, args.input, args.output, args.filter);
-            } else if ("import".equals(args.mode)) {
-                runImport(spark, args.input, args.output, args.filter);
+            if ("export".equals(config.mode)) {
+                runExport(spark);
+            } else if ("import".equals(config.mode)) {
+                runImport(spark);
             } else {
-                throw new IllegalArgumentException("Unknown mode: " + args.mode);
+                throw new IllegalArgumentException("Unknown mode: " + config.mode);
             }
         }
     }
 
+    /**
+     * Program entry point.
+     *
+     * @param args Command line arguments
+     */
     public static void main(String[] args) {
         try {
             Config parsed = parseArgs(args);
+            if (parsed.mode == null || parsed.tableName == null || parsed.directory == null) {
+                System.out.println("USAGE: Copier --mode export|import "
+                        + "--table YDB-TABLE --directory LOCAL-DIRECTORY "
+                        + "[--filter FILTER-CONDITION]");
+                System.exit(2);
+            }
             Properties sparkConfig = loadPropertiesFromXml(parsed.configPath);
             Copier main = new Copier(sparkConfig, parsed);
             main.run();
@@ -72,23 +83,28 @@ public class Copier {
         }
     }
 
-    private void runExport(SparkSession spark, String table, String outputDir, String filter) {
-        String sql = buildSelectSql(table, filter);
-        log.info("Export: {} -> {}", sql, outputDir);
+    private void runExport(SparkSession spark) {
+        String sql = buildSelectSql(config.tableName, config.filter);
+        log.info("Export: {} -> {}", sql, config.directory);
 
         Dataset<Row> df = spark.sql(sql);
-        df.write().mode("overwrite").parquet(outputDir);
+        df.write().mode("overwrite").parquet(config.directory);
 
         log.info("Done.");
     }
 
-    private void runImport(SparkSession spark, String inputDir, String table, String filter) {
-        Dataset<Row> df = spark.read().parquet(inputDir);
+    private void runImport(SparkSession spark) {
+        Dataset<Row> df = spark.read().parquet(config.directory);
         df.createOrReplaceTempView("parquet_src");
 
-        String filterClause = (filter != null && !filter.isBlank()) ? " WHERE " + filter : "";
-        String sql = "INSERT INTO " + table + " SELECT * FROM parquet_src" + filterClause;
-        log.info("Import: {} -> {} (sql: {})", inputDir, table, sql);
+        String table = config.tableName;
+        if (table.contains("/")) {
+            table = table.replace('/', '.');
+        }
+        String filterClause = (config.filter != null && !config.filter.isBlank())
+                ? " WHERE " + config.filter : "";
+        String sql = "INSERT INTO " + CATALOG_NAME + "." + table + " SELECT * FROM parquet_src" + filterClause;
+        log.info("Import: {} -> {} (sql: {})", config.directory, table, sql);
 
         spark.sql(sql);
 
@@ -96,8 +112,11 @@ public class Copier {
     }
 
     private static String buildSelectSql(String table, String filter) {
+        if (table.contains("/")) {
+            table = table.replace('/', '.');
+        }
         String filterClause = (filter != null && !filter.isBlank()) ? " WHERE " + filter : "";
-        return "SELECT * FROM " + table + filterClause;
+        return "SELECT * FROM " + CATALOG_NAME + "." + table + filterClause;
     }
 
     private static Properties loadPropertiesFromXml(String configPath) throws Exception {
@@ -124,14 +143,14 @@ public class Copier {
                         result.mode = args[++i];
                     }
                 }
-                case "--input" -> {
+                case "--table" -> {
                     if (i + 1 < args.length) {
-                        result.input = args[++i];
+                        result.tableName = args[++i];
                     }
                 }
-                case "--output" -> {
+                case "--directory" -> {
                     if (i + 1 < args.length) {
-                        result.output = args[++i];
+                        result.directory = args[++i];
                     }
                 }
                 case "--filter" -> {
@@ -147,24 +166,59 @@ public class Copier {
             }
         }
 
-        if (result.mode != null) {
-            if (result.input == null) {
-                throw new IllegalArgumentException("--input is required for mode=" + result.mode);
-            }
-            if (result.output == null) {
-                throw new IllegalArgumentException("--output is required for mode=" + result.mode);
-            }
-        }
-
         return result;
     }
 
+    /**
+     * Configuration settings for Copier.
+     */
     public static class Config {
 
-        String configPath;
-        String mode;
-        String input;
-        String output;
-        String filter;
+        private String configPath;
+        private String mode;
+        private String tableName;
+        private String directory;
+        private String filter;
+
+        public String getConfigPath() {
+            return configPath;
+        }
+
+        public void setConfigPath(String configPath) {
+            this.configPath = configPath;
+        }
+
+        public String getMode() {
+            return mode;
+        }
+
+        public void setMode(String mode) {
+            this.mode = mode;
+        }
+
+        public String getTableName() {
+            return tableName;
+        }
+
+        public void setTableName(String tableName) {
+            this.tableName = tableName;
+        }
+
+        public String getDirectory() {
+            return directory;
+        }
+
+        public void setDirectory(String directory) {
+            this.directory = directory;
+        }
+
+        public String getFilter() {
+            return filter;
+        }
+
+        public void setFilter(String filter) {
+            this.filter = filter;
+        }
+
     }
 }
