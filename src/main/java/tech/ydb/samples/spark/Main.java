@@ -29,31 +29,47 @@ public class Main {
     private static final String DEFAULT_CONFIG_PATH = "spark-config.xml";
     private static final String CATALOG_NAME = "src";
 
-    public static void main(String[] args) throws Exception {
-        Args parsed = parseArgs(args);
-        String configPath = parsed.configPath;
+    private final Properties sparkConfig;
+    private final Args args;
 
+    public Main(Properties sparkConfig, Args args) {
+        this.sparkConfig = sparkConfig;
+        this.args = args;
+    }
+
+    public void run() throws Exception {
         SparkSession.Builder builder = SparkSession.builder()
-                .appName("YDB Spark Sample")
+                .appName("YDB Table Copier")
                 .master("local[*]");
 
-        Properties props = loadPropertiesFromXml(configPath);
-        props.forEach((k, v) -> builder.config(k.toString(), v.toString()));
+        sparkConfig.forEach((k, v) -> builder.config(k.toString(), v.toString()));
 
         try (SparkSession spark = builder.getOrCreate()) {
-            if (parsed.mode == null) {
+            if (args.mode == null) {
                 runShowTables(spark);
-            } else if ("export".equals(parsed.mode)) {
-                runExport(spark, props, parsed.input, parsed.output, parsed.filter);
-            } else if ("import".equals(parsed.mode)) {
-                runImport(spark, parsed.input, parsed.output, parsed.filter);
+            } else if ("export".equals(args.mode)) {
+                runExport(spark, args.input, args.output, args.filter);
+            } else if ("import".equals(args.mode)) {
+                runImport(spark, args.input, args.output, args.filter);
             } else {
-                throw new IllegalArgumentException("Unknown mode: " + parsed.mode);
+                throw new IllegalArgumentException("Unknown mode: " + args.mode);
             }
         }
     }
 
-    private static void runShowTables(SparkSession spark) {
+    public static void main(String[] args) {
+        try {
+            Args parsed = parseArgs(args);
+            Properties sparkConfig = loadPropertiesFromXml(parsed.configPath);
+            Main main = new Main(sparkConfig, parsed);
+            main.run();
+        } catch(Exception ex) {
+            log.error("FATAL", ex);
+            System.exit(1);
+        }
+    }
+
+    private void runShowTables(SparkSession spark) {
         log.info("Spark session created. Running: SHOW TABLES FROM {}", CATALOG_NAME);
         log.info("---");
         Dataset<Row> tables = spark.sql("SHOW TABLES FROM " + CATALOG_NAME);
@@ -62,7 +78,7 @@ public class Main {
         log.info("Done.");
     }
 
-    private static void runExport(SparkSession spark, Properties props, String table, String outputDir, String filter) {
+    private void runExport(SparkSession spark, String table, String outputDir, String filter) {
         String sql = buildSelectSql(table, filter);
         log.info("Export: {} -> {}", sql, outputDir);
 
@@ -72,7 +88,7 @@ public class Main {
         log.info("Done.");
     }
 
-    private static void runImport(SparkSession spark, String inputDir, String table, String filter) {
+    private void runImport(SparkSession spark, String inputDir, String table, String filter) {
         Dataset<Row> df = spark.read().parquet(inputDir);
         df.createOrReplaceTempView("parquet_src");
 
@@ -91,16 +107,8 @@ public class Main {
     }
 
     private static Properties loadPropertiesFromXml(String configPath) throws Exception {
-        Path path = Paths.get(configPath);
-        if (!Files.exists(path)) {
-            path = Paths.get("src/main/resources", configPath);
-        }
-        if (!Files.exists(path)) {
-            throw new IllegalArgumentException("Config file not found: " + configPath);
-        }
-
         Properties props = new Properties();
-        try (InputStream is = Files.newInputStream(path)) {
+        try (InputStream is = Files.newInputStream(Paths.get(configPath))) {
             props.loadFromXML(is);
         }
         return props;
