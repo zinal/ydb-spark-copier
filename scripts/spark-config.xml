@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<!--
+  Spark configuration for YDB Catalog API.
+  See: https://ydb.tech/docs/en/integrations/ingestion/spark
+-->
+<properties>
+    <entry key="spark.sql.catalog.src">tech.ydb.spark.connector.YdbCatalog</entry>
+    <entry key="spark.sql.catalog.src.url">grpc://localhost:2136/local</entry>
+    <!-- Optional: spark.sql.catalog.src.auth.token.file=~/.token -->
+    <!-- Optional: spark.sql.catalog.src.auth.ca.file=~/myCertificate.cer -->
+    <entry key="spark.executor.memory">4g</entry>
+</properties>
