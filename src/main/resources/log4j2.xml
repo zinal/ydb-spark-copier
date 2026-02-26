@@ -10,7 +10,9 @@
     <Logger name="org.sparkproject" level="warn"/>
     <Logger name="org.apache.spark" level="warn"/>
     <Logger name="org.apache.hadoop" level="warn"/>
+    <Logger name="org.apache.parquet" level="warn"/>
     <Logger name="tech.ydb" level="warn"/>
+    <Logger name="tech.ydb.spark" level="info"/>
     <Root level="info">
       <AppenderRef ref="STDERR"/>
     </Root>

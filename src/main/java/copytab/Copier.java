@@ -1,7 +1,5 @@
 package copytab;
 
-import org.apache.spark.sql.Dataset;
-import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.HashMap;
 import java.util.Properties;
 
 /**
@@ -27,7 +26,9 @@ public class Copier {
 
     private static final String DEFAULT_CONFIG_PATH = "spark-config.xml";
     private static final String CATALOG_NAME = "src";
-    private static final String CATALOG_PROPERTY = "spark.sql.catalog.src";
+    private static final String CATALOG_PREFIX = "spark.sql.catalog.src.";
+    private static final String CATALOG_PROPERTY = CATALOG_PREFIX + "url";
+    private static final String CORES_PROPERTY = "spark.executor.cores";
 
     private final Properties sparkConfig;
     private final Config config;
@@ -50,10 +51,18 @@ public class Copier {
         }
         log.info("YDB connection URL: {}", url);
 
+        String master = "local[*]";
+        String coresCount = sparkConfig.getProperty(CORES_PROPERTY);
+        if (coresCount != null && coresCount.length() > 0) {
+            master = "local[" + coresCount + "]";
+        }
+
         SparkSession.Builder builder = SparkSession.builder()
                 .appName("YDB Table Copier")
-                .master("local[*]");
-        sparkConfig.forEach((k, v) -> builder.config(k.toString(), v.toString()));
+                .master(master);
+        for (var me : sparkConfig.entrySet()) {
+            builder = builder.config(me.getKey().toString(), me.getValue().toString());
+        }
 
         try (SparkSession spark = builder.getOrCreate()) {
             if ("export".equals(config.mode)) {
@@ -93,28 +102,50 @@ public class Copier {
         String sql = buildSelectSql(config.tableName, config.filter);
         log.info("Export: {} -> {}", sql, config.directory);
 
-        Dataset<Row> df = spark.sql(sql);
+        var df = spark.sql(sql);
         df.write().mode("overwrite").parquet(config.directory);
 
         log.info("Done.");
     }
 
     private void runImport(SparkSession spark) {
-        Dataset<Row> df = spark.read().parquet(config.directory);
-        df.createOrReplaceTempView("parquet_src");
+        var df1 = spark.read().parquet(config.directory);
+        df1.createOrReplaceTempView("parquet_src");
+
+        String filterClause = (config.filter != null && !config.filter.isBlank())
+                ? " WHERE " + config.filter : "";
+        String sql = "SELECT * FROM parquet_src" + filterClause;
+
+        var df2 = spark.sql(sql);
 
         String table = config.tableName;
         if (table.contains("/")) {
             table = table.replace('/', '.');
         }
-        String filterClause = (config.filter != null && !config.filter.isBlank())
-                ? " WHERE " + config.filter : "";
-        String sql = "INSERT INTO " + CATALOG_NAME + "." + table + " SELECT * FROM parquet_src" + filterClause;
         log.info("Import: {} -> {} (sql: {})", config.directory, table, sql);
 
-        spark.sql(sql);
+        df2.write().format("ydb")
+                .mode("append")
+                .option("method", "UPSERT")
+                .option("dbtable", table)
+                .option("batch.rows", "50000")
+                .option("batch.sizelimit", "20971520")
+                .option("write.retry.count", "100")
+                .options(extractYdbConfig())
+                .save();
 
         log.info("Done.");
+    }
+
+    private HashMap<String, String> extractYdbConfig() {
+        var ret = new HashMap<String, String>();
+        for (var me : sparkConfig.entrySet()) {
+            String key = me.getKey().toString();
+            if (key.startsWith(CATALOG_PREFIX)) {
+                ret.put(key.substring(CATALOG_PREFIX.length()), me.getValue().toString());
+            }
+        }
+        return ret;
     }
 
     private static String buildSelectSql(String table, String filter) {

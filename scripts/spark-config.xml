@@ -10,4 +10,5 @@
     <!-- Optional: spark.sql.catalog.src.auth.token.file=~/.token -->
     <!-- Optional: spark.sql.catalog.src.auth.ca.file=~/myCertificate.cer -->
     <entry key="spark.executor.memory">4g</entry>
+    <entry key="spark.executor.cores">4</entry>
 </properties>
