@@ -13,25 +13,14 @@
 
 - **Интеграция с каталогом**: YDB представлен как каталог Spark SQL с именем `src`. Конфигурация каталога (URL подключения, аутентификация и т.д.) загружается из XML-файла свойств.
 - **Экспорт**: `SELECT * FROM src.<table> [WHERE ...]` → Spark DataFrame → файлы Parquet (режим перезаписи).
-- **Импорт**: каталог Parquet → Spark DataFrame → временное представление → `INSERT INTO src.<table> SELECT * FROM parquet_src [WHERE ...]`.
-- **Именование таблиц**: пути к таблицам YDB используют точки (например, `database.schema.table`). Слэши в имени таблицы автоматически заменяются на точки.
+- **Импорт**: каталог Parquet → Spark DataFrame → временное представление → `SELECT * FROM parquet_src [WHERE ...]` → таблица YDB.
+- **Именование таблиц**: пути к таблицам YDB указываются нативно со слэшами в качестве разделителей схемы, но без имени базы данных (например, `table_in_root` или `schema/table_in_schema`). Слэши в имени таблицы автоматически преобразуются в точки для совместимости с нотацией Spark SQL при необходимости.
 
 ## Требования
 
 - Java 17
 - Maven 3.6+
 - Экземпляр YDB (локальный Docker или удалённый)
-
-## Конфигурация
-
-Отредактируйте `scripts/spark-config.xml` (или ваш конфигурационный файл) для задания параметров подключения к YDB:
-
-- **spark.sql.catalog.src** — класс реализации каталога YDB
-- **spark.sql.catalog.src.url** — строка подключения к YDB (например, `grpc://localhost:2136/local` для локального Docker)
-- **spark.sql.catalog.src.auth.token.file** — путь к файлу токена для облачного/удалённого YDB (раскомментируйте при необходимости)
-- **spark.sql.catalog.src.auth.ca.file** — путь к TLS-сертификату для защищённых соединений (раскомментируйте при необходимости)
-
-Подробнее см. [документацию YDB Spark](https://ydb.tech/docs/ru/integrations/ingestion/spark).
 
 ## Сборка
 
@@ -40,6 +29,23 @@ mvn clean package
 ```
 
 В результате создаётся `target/ydb-copier-1.0-SNAPSHOT.jar` и, при использовании release-профиля, `target/ydb-copier-1.0-SNAPSHOT-bin.zip` с JAR, зависимостями и скриптами.
+
+## Конфигурация
+
+Отредактируйте `spark-config.xml` (или ваш конфигурационный файл) для задания параметров подключения к YDB:
+
+- **spark.sql.catalog.src** — класс реализации каталога YDB
+- **spark.sql.catalog.src.url** — строка подключения к YDB (например, `grpc://localhost:2136/local` для локального Docker)
+- **spark.sql.catalog.src.auth.token.file** — путь к файлу токена для облачного/удалённого YDB (раскомментируйте при необходимости)
+- **spark.sql.catalog.src.auth.ca.file** — путь к TLS-сертификату для защищённых соединений (раскомментируйте при необходимости)
+
+Подробнее см. [документацию YDB Spark](https://ydb.tech/docs/ru/integrations/ingestion/spark).
+
+### Ядра и память
+
+- **spark.executor.cores** — задаёт количество рабочих потоков на исполнитель. Настраивается в `spark-config.xml` или через опцию `--conf` при использовании `spark-submit`.
+- **spark.executor.memory** — должно быть не менее 1G на ядро (например, 4G для 4 ядер). Задаётся в `spark-config.xml` или через `--conf`.
+- **-Xmx** (куча JVM) — при запуске через стартовый скрипт (например, `ydb-copier.sh`) задайте `-Xmx` примерно в два раза больше значения `spark.executor.memory`. Например, при `spark.executor.memory=4g` используйте `-Xmx8g` или `-Xmx8192m`.
 
 ## Использование
 
@@ -57,22 +63,22 @@ mvn clean package
 
 **Экспорт таблицы YDB в Parquet:**
 ```bash
-mvn exec:java -Dexec.args="--config spark-config.xml --mode export --table mydb.myschema.mytable --directory /tmp/parquet-out"
+./ydb-copier.sh --config spark-config.xml --mode export --table myschema/mytable --directory /tmp/parquet-out
 ```
 
 **Экспорт с фильтром:**
 ```bash
-mvn exec:java -Dexec.args="--config spark-config.xml --mode export --table mydb.myschema.mytable --directory /tmp/parquet-out --filter 'id>100 AND status=\"active\"'"
+./ydb-copier.sh --config spark-config.xml --mode export --table myschema/mytable --directory /tmp/parquet-out --filter "id > 100 AND status='active'"
 ```
 
 **Импорт Parquet в YDB:**
 ```bash
-mvn exec:java -Dexec.args="--config spark-config.xml --mode import --table mydb.myschema.mytable --directory /tmp/parquet-in"
+./ydb-copier.sh --config spark-config.xml --mode import --table myschema/mytable --directory /tmp/parquet-in
 ```
 
 **Импорт с фильтром:**
 ```bash
-mvn exec:java -Dexec.args="--config spark-config.xml --mode import --table mydb.myschema.mytable --directory /tmp/parquet-in --filter 'year=2024'"
+./ydb-copier.sh --config spark-config.xml --mode import --table myschema/mytable --directory /tmp/parquet-in --filter "dt <= '2026-02-03T00:00:00.000000Z'"
 ```
 
 ### spark-submit

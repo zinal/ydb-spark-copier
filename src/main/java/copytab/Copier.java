@@ -99,11 +99,22 @@ public class Copier {
     }
 
     private void runExport(SparkSession spark) {
-        String sql = buildSelectSql(config.tableName, config.filter);
-        log.info("Export: {} -> {}", sql, config.directory);
+        var df1 = spark.read().format("ydb")
+                .option("dbtable", config.tableName)
+                .option("useReadTable", "true")
+                .options(extractYdbConfig())
+                .load();
+        df1.createOrReplaceTempView("ydb_src");
 
-        var df = spark.sql(sql);
-        df.write().mode("overwrite").parquet(config.directory);
+        String filterClause = (config.filter != null && !config.filter.isBlank())
+                ? " WHERE " + config.filter : "";
+        String sql = "SELECT * FROM ydb_src" + filterClause;
+
+        var df2 = spark.sql(sql);
+
+        log.info("Export: {} -> {} (sql {}}", config.tableName, config.directory, sql);
+
+        df2.write().mode("overwrite").parquet(config.directory);
 
         log.info("Done.");
     }
@@ -118,16 +129,12 @@ public class Copier {
 
         var df2 = spark.sql(sql);
 
-        String table = config.tableName;
-        if (table.contains("/")) {
-            table = table.replace('/', '.');
-        }
-        log.info("Import: {} -> {} (sql: {})", config.directory, table, sql);
+        log.info("Import: {} -> {} (sql: {})", config.directory, config.tableName, sql);
 
         df2.write().format("ydb")
                 .mode("append")
                 .option("method", "UPSERT")
-                .option("dbtable", table)
+                .option("dbtable", config.tableName)
                 .option("batch.rows", "50000")
                 .option("batch.sizelimit", "20971520")
                 .option("write.retry.count", "100")
