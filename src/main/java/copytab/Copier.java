@@ -25,7 +25,6 @@ public class Copier {
     private static final Logger log = LoggerFactory.getLogger(Copier.class);
 
     private static final String DEFAULT_CONFIG_PATH = "spark-config.xml";
-    private static final String CATALOG_NAME = "src";
     private static final String CATALOG_PREFIX = "spark.sql.catalog.src.";
     private static final String CATALOG_PROPERTY = CATALOG_PREFIX + "url";
     private static final String CORES_PROPERTY = "spark.executor.cores";
@@ -59,18 +58,25 @@ public class Copier {
 
         SparkSession.Builder builder = SparkSession.builder()
                 .appName("YDB Table Copier")
+                .config("spark.ui.enabled", false)
                 .master(master);
         for (var me : sparkConfig.entrySet()) {
             builder = builder.config(me.getKey().toString(), me.getValue().toString());
         }
 
         try (SparkSession spark = builder.getOrCreate()) {
-            if ("export".equals(config.mode)) {
-                runExport(spark);
-            } else if ("import".equals(config.mode)) {
-                runImport(spark);
-            } else {
-                throw new IllegalArgumentException("Unknown mode: " + config.mode);
+            RowsWrittenListener rowsListener = new RowsWrittenListener();
+            spark.sparkContext().addSparkListener(rowsListener);
+            try {
+                if ("export".equals(config.mode)) {
+                    runExport(spark);
+                } else if ("import".equals(config.mode)) {
+                    runImport(spark);
+                } else {
+                    throw new IllegalArgumentException("Unknown mode: " + config.mode);
+                }
+            } finally {
+                rowsListener.stop();
             }
         }
     }
@@ -100,9 +106,8 @@ public class Copier {
 
     private void runExport(SparkSession spark) {
         var df1 = spark.read().format("ydb")
-                .option("dbtable", config.tableName)
-                .option("useReadTable", "true")
                 .options(extractYdbConfig())
+                .option("dbtable", config.tableName)
                 .load();
         df1.createOrReplaceTempView("ydb_src");
 
@@ -112,7 +117,7 @@ public class Copier {
 
         var df2 = spark.sql(sql);
 
-        log.info("Export: {} -> {} (sql {}}", config.tableName, config.directory, sql);
+        log.info("Export: {} -> {} (sql: {})", config.tableName, config.directory, sql);
 
         df2.write().mode("overwrite").parquet(config.directory);
 
@@ -134,11 +139,11 @@ public class Copier {
         df2.write().format("ydb")
                 .mode("append")
                 .option("method", "UPSERT")
-                .option("dbtable", config.tableName)
                 .option("batch.rows", "50000")
                 .option("batch.sizelimit", "20971520")
                 .option("write.retry.count", "100")
                 .options(extractYdbConfig())
+                .option("dbtable", config.tableName)
                 .save();
 
         log.info("Done.");
@@ -153,14 +158,6 @@ public class Copier {
             }
         }
         return ret;
-    }
-
-    private static String buildSelectSql(String table, String filter) {
-        if (table.contains("/")) {
-            table = table.replace('/', '.');
-        }
-        String filterClause = (filter != null && !filter.isBlank()) ? " WHERE " + filter : "";
-        return "SELECT * FROM " + CATALOG_NAME + "." + table + filterClause;
     }
 
     private static Properties loadPropertiesFromXml(String configPath) throws Exception {

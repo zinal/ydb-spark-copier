@@ -7,8 +7,25 @@
 <properties>
     <entry key="spark.sql.catalog.src">tech.ydb.spark.connector.YdbCatalog</entry>
     <entry key="spark.sql.catalog.src.url">grpc://localhost:2136/local</entry>
-    <!-- Optional: spark.sql.catalog.src.auth.token.file=~/.token -->
-    <!-- Optional: spark.sql.catalog.src.auth.ca.file=~/myCertificate.cer -->
+    <!-- Optional:
+    <entry key="spark.sql.catalog.src.auth.ca.file">~/myCertificate.cer</entry>
+    <entry key="spark.sql.catalog.src.auth.login">user1</entry>
+    <entry key="spark.sql.catalog.src.auth.password">password</entry>
+    -->
     <entry key="spark.executor.memory">4g</entry>
     <entry key="spark.executor.cores">4</entry>
+
+    <!--
+    ** to monitor the spark job
+    <entry key="spark.ui.enabled">true</entry>
+
+    ** use ReadTable instead of SQL queries to read the input
+    <entry key="spark.sql.catalog.src.useReadTable">true</entry>
+
+    ** Write related options
+    <entry key="spark.sql.catalog.src.method">BULK_UPSERT</entry>
+    <entry key="spark.sql.catalog.src.batch.rows">50000</entry>
+    <entry key="spark.sql.catalog.src.batch.sizelimit">20971520</entry>
+    <entry key="spark.sql.catalog.src.write.retry.count">100</entry>
+    -->
 </properties>

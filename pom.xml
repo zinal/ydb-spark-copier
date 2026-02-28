@@ -17,7 +17,7 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <spark.version>3.5.8</spark.version>
-        <ydb.connector.version>2.1.0</ydb.connector.version>
+        <ydb.connector.version>2.1.1</ydb.connector.version>
     </properties>
 
     <dependencyManagement>
